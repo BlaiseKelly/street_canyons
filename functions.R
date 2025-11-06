@@ -469,7 +469,7 @@ canyonz <- st_transform(canyonz, 4326)
 Left_lines <- do.call(rbind, L_line)
 Right_lines <- do.call(rbind, R_line)
 
-canyons_lines <- list(canyonz, Left_lines)
+canyons_lines <- list(canyonz, Left_lines, Right_lines)
 
 return(canyons_lines)
 
