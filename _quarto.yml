@@ -1,5 +1,6 @@
 project:
   type: website
+  output-dir: docs   
 
 website:
   title: "street_canyons"
@@ -7,6 +8,8 @@ website:
     left:
       - href: index.qmd
         text: Home
+      - href: maps/canyons.html
+        text: interactive map
       - about.qmd
 
 format:
