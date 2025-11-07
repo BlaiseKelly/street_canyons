@@ -8,6 +8,7 @@ library(dplyr)
 library(tidyr)
 library(birk)
 library(leaflet)
+library(htmlwidgets)
 library(tmap)
 
 source("functions.R")
@@ -57,7 +58,7 @@ plot(dsm_hs, col = hcl.colors(256, "Blues"), legend = FALSE)
 #convert to a boundary box
 bb <- st_bbox(st_transform(search_box,4326))
 
-##download building data from OSM
+##download road data from OSM
 x <- opq(bbox = bb) %>% 
   add_osm_feature(key = c('highway')) %>% osmdata_sf()
 
@@ -65,6 +66,12 @@ x <- opq(bbox = bb) %>%
 roads <- osmactive::get_driving_network(x$osm_lines) |> 
   st_transform(27700) |> 
   transmute(osm_id, length = st_length(geometry))
+
+##download building data from OSM
+x <- opq(bbox = bb) %>% 
+  add_osm_feature(key = c('buildings')) %>% osmdata_sf()
+
+buildings <- x$osm_polygons
 
 ##SPLIT INTO SMALLER LINKS FOR ADVANCED CANYON
 ##advanced canyon links
@@ -86,9 +93,9 @@ canyon_linez <- create_canyons(vgt = vgt_file,
 # select the individual outputs for each
 canyonz <- canyon_linez[[1]]
 
-line_L <- canyon_linez[[2]]
+lines_L <- canyon_linez[[2]]
 
-line_R <- canyon_linez[[3]]
+lines_R <- canyon_linez[[3]]
 
 # can combine to get an idea of the road extents
 canyon_union <- st_union(canyonz)
@@ -100,49 +107,35 @@ vgt_dat <- vgt_can %>%
   distinct(Source.name, .keep_all = TRUE) %>% 
   select(-X..m., -Y..m., -Side_R, -Side_L)
 
-canyonz_dat <- left_join(canyonz, vgt_file, by = c("main" = "Source.name")) 
-Left_lines <- Left_lines %>% 
-  left_join(vgt_dat, by = c("L" = "Source.name")) %>% 
-  st_transform(4326)
-Right_lines <- Right_lines %>% 
-  left_join(vgt_dat, by = c("L" = "Source.name")) %>% 
-  st_transform(4326)
-
-# determine if the road is classed as a street canyon - i.e. ration 
-scs <- vgt_dat |> 
+canyonz_dat <- canyonz |> 
+  left_join(all_roads, by = c("main" = "ID")) |> 
   mutate(L_sc = avgHeight_L/width_L,
-         R_sc = avgHeight_R/width_R) |> 
-  mutate(sc = (L_sc+R_sc)/2)
+       R_sc = avgHeight_R/width_R) |> 
+  mutate(sc_ratio = (L_sc+R_sc)/2) |> 
+  mutate(sc = if_else(sc_ratio >1, "YES", "NO")) |> 
+  rowwise() |> 
+  mutate(avg_height = sum(avgHeight_L+avgHeight_R)/2)
 
-canyon_sc <- canyonz |> 
-  left_join(scs, by = c("main" = "Source.name")) |> 
-  filter(sc >= 1)
+Left_lines <- lines_L %>% 
+  left_join(all_roads, by = c("L" = "ID")) |> 
+  select(ID = L, avgHeight_L, maxHeight_L, minHeight_L, width_L,diff_L)|> 
+  mutate(sc_ratio = avgHeight_L/width_L) |> 
+  mutate(sc = if_else(sc_ratio >1, "YES", "NO")) |> 
+  st_transform(4326)
 
+Right_lines <- lines_R %>% 
+  left_join(all_roads, by = c("L" = "ID")) |> 
+  select(ID = L, avgHeight_R, maxHeight_R, minHeight_R, width_R,diff_R)|> 
+  mutate(sc_ratio = avgHeight_R/width_R) |> 
+  mutate(sc = if_else(sc_ratio >1, "YES", "NO")) |> 
+  st_transform(4326)
+
+
+# try splitting by road centreline
 canyon_split <- st_as_sf(st_split(canyon_union,roads))
 
-mapview(canyon_split)
-
-
-
-
-
-canyonz_dat<- mutate(canyonz_dat, avgHeight = (avgHeight_L + avgHeight_R)/2)
-st_geometry(canyonz_dat) <- canyonz_dat$geometry
-canyonz_dat <- st_transform(canyonz_dat, latlong)
-#W_canyons <- filter(canyonz, grepl("W", main))
-#E_canyons <- filter(canyonz, grepl("E", main))
-
-save(canyonz_dat, Left_lines, Right_lines, roads, modelled_area, file = "canyons.RData")
-
-mapview(Right_lines, color = "red")+mapview(Left_lines, color = "yellow")+canyonz
-
-mapview(canyonz)+buildings
-
-library(leaflet)
-library(htmlwidgets)
-
-lon <- st_coordinates(st_centroid(modelled_area))[1]
-lat <- st_coordinates(st_centroid(modelled_area))[2]
+lon <- st_coordinates(st_centroid(st_transform(search_box,4326)))[1]
+lat <- st_coordinates(st_centroid(st_transform(search_box,4326)))[2]
 
 height_bins <- seq(from = 0, to = 70, by = 4)
 
@@ -158,19 +151,14 @@ pal_R <- colorNumeric("viridis", height_bins,
 #                                             '<br><strong>Factor 5 (ug/m3): </strong> ', f5,
 #                                             '<br><strong>Factor 20 (ug/m3): </strong> ', f20))
 
-canyonz_dat <- canyonz |> 
-  left_join(all_roads, by = c("main" = "ID")) |> 
-  rowwise() |> 
-  mutate(avg_height = sum(avgHeight_L+avgHeight_R)/2)
-
-canyonz_diff <- st_difference(canyonz)
-mapview(canyonz_diff)+roads
 
 hgt_pal <- cols4all::c4a("hcl.grays")
 
 canyon_pal <- cols4all::c4a("kovesi.rainbow_bgyr_35_85_c73")
 
 canyonz_plot <- select(canyonz_dat, `average height\nsurroundings (m)` = avg_height, geometry)
+
+roads_ll <- st_transform(roads,4326)
 
 dir.create("plots/")
 
@@ -187,28 +175,53 @@ load("london.RData")
 m <- leaflet() %>% 
   addProviderTiles("CartoDB.Positron", group = "CartoDB")
 
-m <- m %>% addPolygons(data = modelled_area, color = "black", fillColor = "yellow", group = "selected area")
+m <- m %>% addPolylines(data = roads_ll, color = "black", weight = 2, fillOpacity = 0.8,popup = paste("Link ID:",roads$osm_id, "<br>",
+                                                                                                   "link length:", roads$length, "<br>"), group = "osm road lines")
 
-m <- m %>% addPolylines(data = roads, color = "black", weight = 2, fillOpacity = 0.8, group = "roads")
+m <- m %>% addPolygons(data = canyonz_dat,
+                       fillColor = ~pal_R(avg_height),
+                       color = "black",
+                       weight = 1,
+                       fillOpacity = 0.8,
+                       popup = paste("Link ID:",canyonz_dat$main, "<br>",
+                                     "mean height both sides:", canyonz_dat$avg_height, "<br>",
+                                     "sc ratio:", canyonz_dat$sc_ratio, "<br>"),
+                       group = "avg height both")
 
-m <- m %>% addPolygons(data = canyonz_dat, fillColor = ~pal_R(avg_height), color = "black", weight = 1, fillOpacity = 0.8, group = "avg h both")
 
-m <- m %>% addPolylines(data = Left_lines, color = ~pal_R(minHeight_L), weight = 2, fillOpacity = 0.8, group = "left min height")
+m <- m %>% addPolylines(data = Left_lines, 
+                        color = ~pal_R(avgHeight_L), 
+                        weight = 2, 
+                        fillOpacity = 0.8,
+                        popup = paste("Link ID:",Left_lines$ID, "<br>",
+                                      "mean height:", Left_lines$avgHeight_L, "<br>",
+                                      "distance to road centre:", Left_lines$width_L, "<br>"),
+                        group = "left mean height")
 
-m <- m %>% addPolylines(data = Left_lines, color = ~pal_R(maxHeight_L), weight = 2, fillOpacity = 0.8, group = "left max height")
+m <- m %>% addPolylines(data = Right_lines,
+                        color = ~pal_R(avgHeight_R),
+                        weight = 2,
+                        fillOpacity = 0.8, 
+                        popup = paste("Link ID:",Right_lines$ID, "<br>",
+                                      "mean height:", Right_lines$avgHeight_L, "<br>",
+                                      "distance to road centre:", Right_lines$width_L, "<br>"),
+                        group = "right mean height")
 
-m <- m %>% addPolylines(data = Right_lines, color = ~pal_R(minHeight_R), weight = 2, fillOpacity = 0.8, group = "right min height")
 
-m <- m %>% addPolylines(data = Right_lines, color = ~pal_R(maxHeight_R), weight = 2, fillOpacity = 0.8, group = "right max height")
+m <- m %>% addPolygons(data = canyon_union,
+                       fillColor = "yellow",
+                       color = "black",
+                       weight = 1,
+                       fillOpacity = 0.8,
+                       popup = "surface area between buildings",
+                       group = "area of road")
+
 
 m <- m %>% addLegend("bottomleft", pal=pal_R, values=height_bins, opacity=1, title = "height (m)")
 
-m <- m %>% addLayersControl(overlayGroups = c("selected area"),  baseGroups = c("avg h both", "left min height", "left max height", 
-                                                                                "right min height", "right max height", "roads"),
+m <- m %>% addLayersControl(overlayGroups = c("selected area"),  
+                            baseGroups = c("avg height both", "left mean height", "right mean height", "osm road lines", "area of road"),
                             options = layersControlOptions(collapsed = FALSE), position = "topright") %>%  hideGroup(c("selected area"))
 
-library(htmlwidgets)
 
-m
-dir.create("maps/")
 withr::with_dir('./', saveWidget(m, file="maps/canyons.html"))
