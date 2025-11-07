@@ -1,6 +1,57 @@
 
 
-
+create_domain <- function(lat = 51.5138,
+                          lon = -0.0983,
+                          x = 532054,
+                          y = 181145,
+                          crs = 4326,
+                          buffer_m = 500,
+                          interactive = FALSE){
+  
+  # create a geo referenced point
+  location <- st_point(c(x_coord,y_coord)) |> 
+    st_sfc(crs = crs)
+  
+  # convert to lat lon for mapview
+  location_ll <- st_transform(location,4326)
+  
+  # Enter lat lon
+  latitude <- 51.5138
+  longitude <- -0.0983
+  
+  if(crs == 4326){
+    # create geo referenced point
+    location_ll <- st_point(c(longitude, latitude)) |> 
+      st_sfc(crs = 4326)
+    location <- st_transform(location_ll, 27700)
+  } else {
+    location <- st_point(c(x_coord,y_coord)) |> 
+      st_sfc(crs = crs)
+    location_ll <- st_transform(location, 4326)
+  }
+  
+  if(interactive == TRUE){
+    
+    modelled_area <- mapview(location_ll, map.types = c("OpenStreetMap", "Esri.WorldTopoMap", "Esri.WorldImagery", "Esri.WorldShadedRelief")) %>%
+      editMap(title = "Use the rectangle tool to draw the area to be modelled and click Done")
+    
+    ##Once finished create variable to be plotted
+    modelled_area <- modelled_area$finished
+    
+    # create the search box
+    domain <- st_transform(modelled_area, 27700)
+    
+  } else {
+    
+    # alternatively create by buffering point (fully reproducible)
+    domain <- location |>
+      st_buffer(buffer_m)
+    
+  }
+  
+  return(domain)
+  
+}
 
 
 
