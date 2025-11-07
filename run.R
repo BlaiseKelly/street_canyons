@@ -3,6 +3,7 @@ library(sf)
 library(raster)
 library(terra)
 library(mapview)
+library(mapedit)
 library(osmdata)
 library(dplyr)
 library(tidyr)
@@ -19,44 +20,35 @@ if (rlang::is_installed("terra")) {
   options(gblidar.out_raster_type = "SpatRaster")
 }
 
-options(gblidar.progress = TRUE) # for readability in this example.
-
-latitude <- 52.36
-longitude <- 4.87
-
-##convert to sf point
-location <- st_point(c(longitude, latitude))
-location <- st_sfc(location, crs = latlong)
-
-
-# # ##Plot the point sources around site to get information, once drawn click FINISH this creates a "simple features" frame (sf)
-# modelled_area <- mapview(location, map.types = c("OpenStreetMap", "Esri.WorldTopoMap", "Esri.WorldImagery", "Esri.WorldShadedRelief")) %>%
-#   editMap(title = "Use the rectangle tool to draw the area to be modelled")
-# 
-# ##Once finished create variable to be plotted
-# modelled_area <- modelled_area$finished
-# mod_area_rdnew <- st_transform(modelled_area, 27700)
-
-search_box <- st_point(c(532054, 181145)) |>
-  st_buffer(500) |>
-  st_sfc() |>
-  st_set_crs(27700)
-
-
 # create folder to save
 dir.create("data")
+dir.create("maps")
+dir.create("out")
+dir.create("plots")
 
-# the elevation data for the first return DSM
-fz_dsm <- eng_composite(search_box, product = "fz_dsm")
-# the hillshade data for the last return DSM
-dsm_hs <- eng_composite(search_box, product = "dsm", product_type = "hillshade")
+options(gblidar.progress = TRUE) # for readability in this example.
+
+# enter UK 27700 coords
+x_coord <- 532054
+y_coord <- 181145
+
+# create domain using default location in the function
+domain <- create_domain()
+
+# have a look at it
+mapview(domain)
+
+# download DSM data for the domain
+fz_dsm <- eng_composite(domain, product = "fz_dsm")
+# the hillshade data is also useful for plots
+dsm_hs <- eng_composite(domain, product = "dsm", product_type = "hillshade")
 
 # have a quick look what has been downloaded
 plot(fz_dsm, col = hcl.colors(150, "mako"))
 plot(dsm_hs, col = hcl.colors(256, "Blues"), legend = FALSE)
 
-#convert to a boundary box
-bb <- st_bbox(st_transform(search_box,4326))
+#convert domain to a boundary box
+bb <- st_bbox(st_transform(domain,4326))
 
 ##download road data from OSM
 x <- opq(bbox = bb) %>% 
@@ -67,11 +59,6 @@ roads <- osmactive::get_driving_network(x$osm_lines) |>
   st_transform(27700) |> 
   transmute(osm_id, length = st_length(geometry))
 
-##download building data from OSM
-x <- opq(bbox = bb) %>% 
-  add_osm_feature(key = c('buildings')) %>% osmdata_sf()
-
-buildings <- x$osm_polygons
 
 ##SPLIT INTO SMALLER LINKS FOR ADVANCED CANYON
 ##advanced canyon links
@@ -101,12 +88,10 @@ lines_R <- canyon_linez[[3]]
 canyon_union <- st_union(canyonz)
 #mapview(canyon_union)
 
-roads_latlon <- st_transform(roads, 4326)
 
-vgt_dat <- vgt_can %>% 
-  distinct(Source.name, .keep_all = TRUE) %>% 
-  select(-X..m., -Y..m., -Side_R, -Side_L)
+write.table(vgt_file, "out/road_links.vgt")
 
+# summarising street canyon
 canyonz_dat <- canyonz |> 
   left_join(all_roads, by = c("main" = "ID")) |> 
   mutate(L_sc = avgHeight_L/width_L,
@@ -134,8 +119,8 @@ Right_lines <- lines_R %>%
 # try splitting by road centreline
 canyon_split <- st_as_sf(st_split(canyon_union,roads))
 
-lon <- st_coordinates(st_centroid(st_transform(search_box,4326)))[1]
-lat <- st_coordinates(st_centroid(st_transform(search_box,4326)))[2]
+lon <- st_coordinates(st_centroid(st_transform(domain,4326)))[1]
+lat <- st_coordinates(st_centroid(st_transform(domain,4326)))[2]
 
 height_bins <- seq(from = 0, to = 70, by = 4)
 
