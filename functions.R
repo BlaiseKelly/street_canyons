@@ -9,7 +9,7 @@ create_domain <- function(lat = 51.5138,
                           interactive = FALSE){
   
   # create a geo referenced point
-  location <- st_point(c(x_coord,y_coord)) |> 
+  location <- st_point(c(x,y)) |> 
     st_sfc(crs = crs)
   
   # convert to lat lon for mapview
