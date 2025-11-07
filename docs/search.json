@@ -5,5 +5,12 @@
     "title": "street_canyons",
     "section": "",
     "text": "To reproduce go to github repository and execute run.R"
+  },
+  {
+    "objectID": "about.html",
+    "href": "about.html",
+    "title": "About",
+    "section": "",
+    "text": "A few pages showing the street canyon tool I created."
   }
 ]
