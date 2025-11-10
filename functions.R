@@ -156,10 +156,11 @@ return(AC_links)
 }
 
 
-create_vgt <- function(road_links){
+create_vgt <- function(road_links,
+                       link_id = "ACN"){
   
   vgt_make <- road_links %>% 
-    select(Source.name = ACN, geometry)
+    select(Source.name = link_id, geometry)
   
   vgt_outz <- list()
   vgtz <- unique(vgt_make$Source.name)
@@ -202,6 +203,14 @@ get_road_dimensions <- function(vgt,
                                 Interval = 0.5, #Enter the interval in metres to scan the road)
                                 dsm
 ){
+  
+  # vgt <- vgt_file
+  # dsm = fz_dsm
+  # Width2Scope = 20 ##Enter the total width to scan in metres
+  # StartPoint = 0.5 ##Enter the start point in metres from the road centre line
+  # Interval = 0.5 #Enter the interval in metres to scan the road)
+  
+  dsm_r <- raster(dsm)
   
   xyz <- data.frame(rasterToPoints(raster(dsm)))
   names(xyz) <- c("x", "y", "z")
@@ -247,6 +256,7 @@ els_stat_L <- list()
 els_stat_R <- list()
 L_Canyons <- list()
 Rd_stats_FULL <- list()
+elevz <- list()
 
 Linkz2 <-  unique(Links_out_many$Source.name)
 #Advanced Street Canyon --------------------------------------------------
@@ -259,8 +269,11 @@ for(L in Linkz2){
       mutate(XY = paste(X..m., Y..m.)) %>% 
       distinct(XY, .keep_all = TRUE) %>% 
       select(-XY)
+
+  
+    
     #X and Y min and max from .vgt file
-    Links_ASCs_1m <- xyz %>% 
+    dsm_xyz <- xyz %>% 
       filter(x > min(The_Link$X..m.)-30,
              x < max(The_Link$X..m.)+30,
              y > min(The_Link$Y..m.)-30,
@@ -281,14 +294,15 @@ for(L in Linkz2){
       ##show a plot of the segment
       #plot(x,y, type="l", main = paste0(L, " distance =", D, "m"))
       
-      # allocate memory for the path
       xn <- numeric( (length(x) - 1) * 2 )
       yn <- numeric( (length(y) - 1) * 2 )
       ##the third loop loops through each segment within the link
       for ( i in 1:(length(x) - 1) ) {
         xs <- c(x[i], x[i+1])
         ys <- c(y[i], y[i+1])
-        new.s <- segment.shift( xs, ys, d )
+        #xs <- c(x[i], x[i+1])
+        #ys <- c(y[i], y[i+1])
+        new.s <- segment.shift(xs, ys, d )
         xn[(i-1)*2+1] <- new.s$x[1] ; xn[(i-1)*2+2] <- new.s$x[2]
         yn[(i-1)*2+1] <- new.s$y[1] ; yn[(i-1)*2+2] <- new.s$y[2]
       }
@@ -297,29 +311,37 @@ for(L in Linkz2){
       #lines(xn, yn, col="brown", lwd =2, lty=2)
       ##create a data frame of results
       Da_Link <- data.frame(x = xn, y = yn, main = paste0(L, " distance =", D, "m"))
+      
       # da_link_sf <- st_as_sf(Da_Link, coords = c("x", "y"), crs = 27700)
       ##define how many points each segment is made up of
       sections <- seq(1:NROW(Da_Link))
       ##the fourth loop finds the closest point on the DSM LIDAR data map to find the height of each point
       for (S in sections){
-        ID_SX <- which.closest(Links_ASCs_1m$x, Da_Link[S,1])
-        ID_SY <- which.closest(Links_ASCs_1m$y, Da_Link[S,2])
+        ID_SX <- which.closest(dsm_xyz$x, Da_Link[S,1])
+        ID_SY <- which.closest(dsm_xyz$y, Da_Link[S,2])
         
-        Elvtn <- filter(Links_ASCs_1m, x == Links_ASCs_1m$x[ID_SX] & y == Links_ASCs_1m$y[ID_SY])
-        ##If 1m LIDAR data doesn't cover area then try the 2m
+        Elvtn <- filter(dsm_xyz, x == dsm_xyz$x[ID_SX] & y == dsm_xyz$y[ID_SY])
+        #If 1m LIDAR data doesn't cover area then try the 2m
         if(NROW(Elvtn)>0){
           Els[[S]] <- Elvtn
-        } else {
-          ID_SX <- which.closest(Links_ASCs_2m$x, Da_Link[S,1])
-          ID_SY <- which.closest(Links_ASCs_2m$y, Da_Link[S,2])
-          
-          Elvtn <- filter(Links_ASCs_2m, x == Links_ASCs_2m$x[ID_SX] & y == Links_ASCs_2m$y[ID_SY])
-          Els[[S]] <- Elvtn
-        }
+        } 
+        # else {
+        #   ID_SX <- which.closest(Links_ASCs_2m$x, Da_Link[S,1])
+        #   ID_SY <- which.closest(Links_ASCs_2m$y, Da_Link[S,2])
+        # 
+        #   Elvtn <- filter(Links_ASCs_2m, x == Links_ASCs_2m$x[ID_SX] & y == Links_ASCs_2m$y[ID_SY])
+        #   Els[[S]] <- Elvtn
+        # }
         
       }
       
       ALL_Elvtns <- do.call(rbind, Els)
+      
+      L_elevs <- ALL_Elvtns |> 
+        mutate(dist = D,
+               side = "L")
+      
+      elevz[[paste0(D,"_L")]] <- L_elevs
       
       els_stats <- data.frame(avg = mean(ALL_Elvtns$z))
       els_stats$max <- max(ALL_Elvtns$z)
@@ -362,24 +384,31 @@ for(L in Linkz2){
       sections <- seq(1:NROW(Da_Link))
       
       for (S in sections){
-        ID_SX <- which.closest(Links_ASCs_1m$x, Da_Link[S,1])
-        ID_SY <- which.closest(Links_ASCs_1m$y, Da_Link[S,2])
+        ID_SX <- which.closest(dsm_xyz$x, Da_Link[S,1])
+        ID_SY <- which.closest(dsm_xyz$y, Da_Link[S,2])
         
-        Elvtn <- filter(Links_ASCs_1m, x == Links_ASCs_1m$x[ID_SX] & y == Links_ASCs_1m$y[ID_SY])
-        ##If 1m LIDAR data doesn't cover area then try the 2m
+        Elvtn <- filter(dsm_xyz, x == dsm_xyz$x[ID_SX] & y == dsm_xyz$y[ID_SY])
+        #If 1m LIDAR data doesn't cover area then try the 2m
         if(NROW(Elvtn)>0){
           Els[[S]] <- Elvtn
-        } else {
-          ID_SX <- which.closest(Links_ASCs_2m$x, Da_Link[S,1])
-          ID_SY <- which.closest(Links_ASCs_2m$y, Da_Link[S,2])
-          
-          Elvtn <- filter(Links_ASCs_2m, x == Links_ASCs_2m$x[ID_SX] & y == Links_ASCs_2m$y[ID_SY])
-          Els[[S]] <- Elvtn
-        }
+        } 
+        # else {
+        #   ID_SX <- which.closest(Links_ASCs_2m$x, Da_Link[S,1])
+        #   ID_SY <- which.closest(Links_ASCs_2m$y, Da_Link[S,2])
+        # 
+        #   Elvtn <- filter(Links_ASCs_2m, x == Links_ASCs_2m$x[ID_SX] & y == Links_ASCs_2m$y[ID_SY])
+        #   Els[[S]] <- Elvtn
+        # }
         
       }
       
       ALL_Elvtns <- do.call(rbind, Els)
+      
+      R_elevs <- ALL_Elvtns |> 
+        mutate(dist = D,
+               side = "L")
+      
+      elevz[[paste0(D,"_R")]] <- R_elevs
       
       els_stats <- data.frame(avg = mean(ALL_Elvtns$z))
       els_stats$max <- max(ALL_Elvtns$z)
@@ -392,19 +421,27 @@ for(L in Linkz2){
       
     }
     
-    Rd_stats_L <- do.call(rbind, els_stat_L)
+    Rd_stats_L <- do.call(rbind, els_stat_L) |> 
+      mutate(avg = avg - first(avg),
+             max = max - first(max),
+             min = min - first(min))
     Rd_stats_L$diff <- c("0", diff(Rd_stats_L$avg))
-    Rd_stats_R <- do.call(rbind, els_stat_R)
+    Rd_stats_R <- do.call(rbind, els_stat_R)|> 
+      mutate(avg = avg - first(avg),
+             max = max - first(max),
+             min = min - first(min))
     Rd_stats_R$diff <- c(diff(Rd_stats_R$avg), "0")
     ##calculate the maximum difference between half metre points to determine the Left canyon width
     Rd_L_MX <- Rd_stats_L[which.max(Rd_stats_L$diff), ]
     Rd_L_MX$D <- abs(Rd_L_MX$D)
     Rd_L_MX$min <- ifelse(Rd_L_MX$min < 0, 0, Rd_L_MX$min)
+    Rd_L_MX$diff <- Rd_L_MX$max-Rd_L_MX$min
     names(Rd_L_MX) <- c("avgHeight_L", "maxHeight_L", "minHeight_L", "width_L", "Side_L", "diff_L") 
     ##calculate the maximum difference between half metre points to determine the Right canyon width
     Rd_R_MX <- Rd_stats_R[which.max(Rd_stats_R$diff), ]
     Rd_R_MX$D <- abs(Rd_R_MX$D)
     Rd_R_MX$min <- ifelse(Rd_R_MX$min < 0, 0, Rd_R_MX$min)
+    Rd_R_MX$diff <- Rd_R_MX$max-Rd_R_MX$min
     names(Rd_R_MX) <- c("avgHeight_R", "maxHeight_R", "minHeight_R", "width_R", "Side_R", "diff_R") 
     ##change all numbers to positive (mainly for the D column)
     Rd_stats <- cbind(Rd_L_MX, Rd_R_MX)
@@ -417,13 +454,17 @@ for(L in Linkz2){
   }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
 }
 
+elevs_out <- do.call(rbind,elevz)
+
 ##bind all the results together in dataframes
 #ALL_EVs <- do.call(rbind, ALL_the_elevations)
 ALL_roads <- do.call(rbind, L_Canyons)
 ALL_roads$ID <- row.names(ALL_roads)
 #ALL_Rd_Stats <- do.call(rbind, Rd_stats_FULL)
 
-return(ALL_roads)
+rds_elevs <- list(ALL_roads,elevs_out)
+
+return(rds_elevs)
 
 }
 
@@ -524,4 +565,37 @@ canyons_lines <- list(canyonz, Left_lines, Right_lines)
 
 return(canyons_lines)
 
+}
+
+
+
+find_noaa_sites <- function(sites, start_date, end_date){
+  
+  ## import all meteo sites
+  met_info <- getMeta()
+  ## geo reference them
+  met_info <- st_as_sf(met_info, coords = c("longitude", "latitude"), crs = 4326)
+  
+  ## find nearest meteo station to site
+  sites$nearest_NOAA <- met_info$code[st_nearest_feature(sites, met_info)]
+  
+  all_met_sites <- unique(sites$nearest_NOAA)
+  
+  ## find data range
+  d8s <- seq(start_date, end_date)
+  all_met <- list()
+  
+  for (m in all_met_sites){
+    tryCatch({
+      data_met <- importNOAA(m, d8s) %>% 
+        select(code, station, date, latitude, longitude, elev, ws, wd, air_temp, atmos_pres,RH, ceil_hgt)
+      
+      all_met[[m]] <- data_met
+      print(m)
+    }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+  }
+  
+  obs_met <- do.call(rbind, all_met)
+  
+  
 }
