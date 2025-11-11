@@ -1,4 +1,13 @@
 
+openair2png <- function(plot, path, plot_name, width = 10500, height = 10000, units="px", res = 800){
+  
+  filename <- paste0(path, plot_name,".png")
+  png(filename, width=width, height=height, units=units, res=res)
+  print(plot)
+  dev.off()
+  
+}
+
 
 create_domain <- function(lat = 51.5138,
                           lon = -0.0983,
